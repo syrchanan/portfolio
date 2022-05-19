@@ -1,1 +1,1 @@
-test readme data mining
+This project was twofold in aim: determine which insurance indicator has the largest effect on the policy charges, as well as finding which model best reflects our data. In the analysis, models of all sorts were used, including: KNN, SVM, Decision Trees, Neural Nets, eXtreme Gradient Boosting, and Naive Bayes.
