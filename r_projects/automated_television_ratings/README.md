@@ -1,1 +1,1 @@
-test readme autotv
+A side project, this was created out of my interest in tracking the daily cable news Nielsen ratings. This script was scheduled to run as a specific time each day, and would scrape the information off of a site, process the data into nice tables, and automatically email me the results. Web scraping was initially quite complex, though after this project using the rvest package is now a much more familiar process.
