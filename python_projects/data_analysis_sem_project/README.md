@@ -1,1 +1,1 @@
-test readme
+Created as a final project for class, this analysis dives into the electric vehicle rebates offered by New York State. Specifically, it uses the apriori algorithm to conduct association rules mining on the information to determine which vehicles were the most popular for consumers to claim the maximum rebate with. Python's pandas, sklearn, and mlxtend libraries featured quite prominently throughout this analysis.
