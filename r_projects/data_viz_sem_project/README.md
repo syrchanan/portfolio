@@ -1,1 +1,1 @@
-***test***
+An early foray into the world of R and the Tidyverse, this project explores the competitive differences between Formula 1 teams who build thier own engines versus those who buy them from manufacturers. Though it is fairly basic analysis in nature, this project offered lots of practice in manipulating and plotting data using the tidyverse.
