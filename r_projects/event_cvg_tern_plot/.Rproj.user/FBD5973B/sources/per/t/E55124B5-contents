@@ -1,0 +1,163 @@
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load("tidyverse", "lubridate", "rvest", 
+               "polite", "tidytext", "textstem",
+               "stringdist", "ggtern", "janitor",
+               "ggrepel")
+
+date <- ymd("2022-12-06")
+
+#6a-6a, numbered in order
+#6a = 0, 7a = 1, 8a = 2, 9a = 3, 10a = 4, 11a = 5, 12n = 6, 1p = 7, 2p = 8,
+#3p = 9, 4p = 10, 5p = 11, 6p = 12, 7p = 13, 8p = 14, 9p = 15, 10p = 16, 
+#11p = 17, 12a = 18, 1a = 19, 2a = 20, 3a = 21, 4a = 22, 5a = 23, ALL DAY = 24
+
+start_hour <- 13
+end_hour <- 21
+
+get_links <- function(date = Sys.Date()-3, user_ngram = 1) {
+  
+  get_part <- function(date, part) {
+    
+    url <- paste0("http://data.gdeltproject.org/gdeltv3/iatv/ngramsv2/", format(date, "%Y%m%d"), ".txt")
+    
+    session <- bow(url)
+    
+    links <- scrape(session) %>% 
+      read_lines()
+    
+    get_network <- function(link) {
+      
+      net <- str_sub(link,
+                     str_locate(link, "ngramsv2/")[2]+1,
+                     str_locate(link, paste0("_", format(date, "%Y%m%d")))[1]-1)
+      
+      return(net)
+      
+    }
+    
+    nets <- map_chr(links, get_network)
+    
+    tibble(links, nets) %>% 
+      filter(nets %in% c("CNNW", "MSNBCW", "FOXNEWSW")) %>% 
+      mutate(ngram = rep(1:5, nrow(.)/5)) %>% 
+      filter(ngram == user_ngram) %>% 
+      mutate(timecode = map_chr(links,
+                                ~ str_sub(.x,
+                                          str_locate(.x, "_[0-9]{6}_")[1]+1,
+                                          str_locate(.x, "_[0-9]{6}_")[2]-1))) %>% 
+      mutate(hour = str_sub(timecode, 1, 2),
+             min = str_sub(timecode, 3, 4)) %>% 
+      mutate(hour = case_when(
+        min == "59" ~ as.numeric(hour) - 4,
+        T ~ as.numeric(hour) - 5
+      )) %>% 
+      mutate(min = case_when(
+        min == "59" ~ 0,
+        T ~ as.numeric(min)
+      )) %>% 
+      filter(case_when(
+        part == 1 ~ hour > 5,
+        part == 2 ~ hour < 6
+      )) -> temp_table_part
+    
+    return(temp_table_part)
+  }
+  
+  part1 <- get_part(date, 1)
+  part2 <- get_part(date+1, 2)
+  
+  part1 %>% 
+    bind_rows(part2) %>% 
+    group_by(nets) %>% 
+    mutate(hour = hour - 6) %>% 
+    mutate(hour = case_when(
+      hour < 0 ~ hour + 24,
+      T ~ hour
+    )) %>%
+    arrange(hour, .by_group = T) -> temp_table_combo
+  
+  return(temp_table_combo)
+  
+}
+
+links_tbl <- get_links(date, 1)
+
+links_tbl %>%
+  filter(hour >= start_hour & hour < end_hour) -> links_tbl_filter
+
+links_tbl_filter %>% 
+  pull(1) %>% 
+  map(read_tsv, 
+        col_names = c("date", "network", "timecode", "ngram", "count", "program"),
+        col_types = "dcccdc") %>% 
+  reduce(rbind) -> ngram_results
+
+ngram_results %>% 
+  filter(!ngram %in% stop_words$word) %>% 
+  mutate(ngram = str_replace_all(ngram, "[[:punct:]]*[[:digit:]]*", ""),
+         ngram = str_to_lower(ngram),
+         ngram = lemmatize_words(ngram)) -> clean_results
+
+word_choice <- "election"
+
+word_choice %>% 
+  str_replace_all("[[:punct:]]*[[:digit:]]*", "") %>% 
+  str_to_lower() %>% 
+  lemmatize_words() -> word_choice_clean
+
+clean_results %>% 
+  bind_cols(
+    stringsim(word_choice_clean, clean_results$ngram, "jw", p = 0.2),
+  ) %>% 
+  rename("similarity" = 7) %>%
+  mutate(guid = paste(network, program, timecode, sep = "_")) -> sim_rating
+
+sim_rating %>% 
+  filter(similarity >= 0.95) %>% 
+  pull(guid) %>% 
+  unique() -> prog_lookup
+
+sim_rating %>% 
+  filter(guid %in% prog_lookup) %>% 
+  filter(similarity < 0.95) %>% 
+  filter(!ngram %in% c(read_lines("custom_stopwords.txt"), "")) %>% 
+  group_by(ngram) %>%
+  summarise(total = sum(count)) %>% 
+  arrange(desc(total)) %>% 
+  slice(1:250) -> top_200_ngrams
+
+sim_rating %>% 
+  filter(guid %in% prog_lookup) %>%
+  filter(ngram %in% top_200_ngrams$ngram) %>% 
+  group_by(network, ngram) %>% 
+  summarise(subtotal = sum(count)) %>%
+  arrange(desc(subtotal), .by_group = T) %>% 
+  top_n(30, subtotal) -> top_ngrams
+  
+
+sim_rating %>% 
+  filter(guid %in% prog_lookup) %>%
+  filter(ngram %in% top_ngrams$ngram) %>% 
+  group_by(network, ngram) %>% 
+  summarise(subtotal = sum(count)) %>%
+  arrange(desc(subtotal), .by_group = T) %>%
+  left_join(top_200_ngrams, by = c("ngram" = "ngram")) %>%
+  mutate(pct_net = subtotal/total) %>% 
+  pivot_wider(ngram, names_from = network, values_from = pct_net) %>%
+  replace_na(replace = list(CNN = 0.01, FOXNEWS = 0.01, MSNBC = 0.01)) %>%
+  clean_names() -> prep_tern_plot
+
+prep_tern_plot %>% 
+  ggtern(aes(x = cnn, y = foxnews, z = msnbc, color = ngram))+
+  geom_point()+
+  geom_text(aes(label = ngram), check_overlap = F)+
+  theme(legend.position = "none")+
+  theme_nomask()+
+  theme_showarrows()+
+  xlab("CNN")+
+  ylab("FXNC")+
+  zlab("MSNBC")
+
+ggsave("raw_tern_plot.svg", plot = last_plot(), 
+       device = "svg", width = 10, height = 10, units = "in")
+
